@@ -1,5 +1,109 @@
+use near_contract_standards::fungible_token::core_impl::ext_fungible_token;
 use near_sdk::borsh::{self, BorshDeserialize, BorshSerialize};
-use near_sdk::{env, near_bindgen};
+use near_sdk::serde::{Deserialize, Serialize};
+use near_sdk::json_types::{U128, ValidAccountId};
+use near_sdk::{
+    env, near_bindgen, ext_contract, Promise,
+    AccountId, Balance, Gas, PromiseResult,
+};
+
+pub use crate::ref_finance_swap_action::{Action, SwapAction};
+
+mod ref_finance_swap_action;
+mod errors;
+mod token_receiver;
+
+const REF_FINANCE_ACCOUNT_ID: &str = "ref-finance.testnet";
+const TRANSFER_TOKEN_ACCOUNT_ID: &str = "banana.ft-fin.testnet";
+
+pub const GAS_FOR_FT_TRANSFER: Gas =      45_000_000_000_000;
+pub const GAS_FOT_FT_TRANSFER_CALL: Gas = 35_000_000_000_000;
+pub const GAS_FOR_CALLBACK: Gas =         45_000_000_000_000;
+pub const GAS_FOR_SWAP: Gas =             30_000_000_000_000;
+
+#[ext_contract(ext_ref)]
+pub trait ExtRefFinanceContract {
+    fn swap(
+        &mut self,
+        actions: Vec<SwapAction>,
+        referral_id: Option<ValidAccountId>,
+    ) -> U128;
+}
+
+#[ext_contract(ext_self)]
+pub trait Callbacks {
+    fn callback_after_swap_to(
+        &mut self,
+        sender_id: AccountId,
+        token_in: AccountId,
+        amount_in: U128,
+    ) -> bool;
+    fn callback_after_swap_from(
+        &mut self,
+        new_address: AccountId,
+        token_out: AccountId,
+        amount_out_min: U128,
+    ) -> bool;
+    fn callback_after_deposit(
+        &mut self,
+        new_address: AccountId,
+        token_out: AccountId,
+        amount_out_min: U128,
+        swap_actions: Vec<SwapAction>,
+    ) -> bool;
+    fn callback_after_swap(
+        &mut self,
+    ) -> bool;
+}
+
+pub trait AfterSwap {
+    fn callback_after_swap_to(
+        &mut self,
+        sender_id: AccountId,
+        token_in: AccountId,
+        amount_in: U128,
+    ) -> bool;
+    fn callback_after_swap_from(
+        &mut self,
+        new_address: AccountId,
+        token_out: AccountId,
+        amount_out_min: U128,
+    ) -> bool;
+    fn callback_after_deposit(
+        &mut self,
+        new_address: AccountId,
+        token_out: AccountId,
+        amount_out_min: U128,
+        swap_actions: Vec<SwapAction>
+    ) -> bool;
+    fn callback_after_swap(
+        &mut self,
+    ) -> bool;
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(crate = "near_sdk::serde")] 
+pub struct SwapFromParams {
+    new_address: AccountId,
+    token_out: AccountId,
+    amount_with_fee: U128,
+    amount_out_min: U128,
+    original_tx_hash: String,
+}
+
+/// Message parametes to receive in ref-finance via token function call
+/// * 'ExecuteSwap' - alternative to deposit + execute ref-finance.SwapAction
+#[derive(Serialize, Deserialize)]
+#[serde(crate = "near_sdk::serde")]
+#[serde(untagged)]
+enum RefFinanceReceiverMessage {
+    ExecuteSwap {
+        // Ref-finance params
+        referal_id: Option<ValidAccountId>,
+        force: u8,
+        actions: Vec<Action>,
+    }
+}
 
 #[near_bindgen]
 #[derive(Default, BorshDeserialize, BorshSerialize)]
@@ -16,21 +120,200 @@ impl Contract {
         }
     }
 
-    pub fn get_solution(&self) -> String {
-        self.crossword_solution.clone()
+    pub fn get_version(&self) -> u64 {
+        1
     }
 
-    pub fn guess_solution(&mut self, solution: String) -> bool {
-        let hashed_input = env::sha256(solution.as_bytes());
-        let hashed_input_hex = hex::encode(&hashed_input);
+    /// Transfer tokens to end user in current blockchain
+    #[payable]
+    pub fn swap_tokens_to_user_with_fee(
+        &mut self,
+        params: SwapFromParams,
+        msg: String,
+    ) -> Promise {
+        //TODO: self.assert_contract_running();
+        //TODO: self.assert_predecessor_is_relayer();
+        //TODO: add validate SwapFromParams
 
-        if hashed_input_hex == self.crossword_solution {
-            env::log_str("You guessed right!");
-            true
-        } else {
-            env::log_str("Try again.");
-            false
+        //TODO: substract fee
+        let amount_with_fee = params
+            .amount_with_fee.0;
+
+        //TODO: if token_out == TRANSFER_TOKEN then just transfer
+        ext_fungible_token::ft_transfer_call(
+            REF_FINANCE_ACCOUNT_ID.to_string(),
+            U128(amount_with_fee),
+            None,
+            msg,
+            &TRANSFER_TOKEN_ACCOUNT_ID.to_string(),
+            1,
+            //GAS_FOT_FT_TRANSFER_CALL,
+            90_000_000_000_000,
+        )
+        .then(ext_fungible_token::ft_transfer(
+            params.new_address.to_string(),
+            params.amount_out_min,
+            None,
+            &params.token_out.to_string(),
+            1,
+            //GAS_FOR_FT_TRANSFER,
+            30_000_000_000_000, 
+        ))
+    }
+
+    #[payable]
+    pub fn swap_tokens_to_user_with_fee_v2(
+        &mut self,
+        params: SwapFromParams,
+        actions: Vec<SwapAction>,
+    ) -> Promise {
+        //TODO: self.assert_contract_running();
+        //TODO: self.assert_predecessor_is_relayer();
+        //TODO: add validate SwapToUser params
+
+        //TODO: subtract fee
+        let amount_with_fee = params
+            .amount_with_fee.0;
+        
+        ext_fungible_token::ft_transfer_call(
+            REF_FINANCE_ACCOUNT_ID.to_string(),
+            U128(amount_with_fee),
+            None,
+            "goddamn".to_string(),
+            &TRANSFER_TOKEN_ACCOUNT_ID.to_string(),
+            1,
+            GAS_FOT_FT_TRANSFER_CALL,
+        )/* 
+        .then(ext_self::callback_after_deposit(
+            params.new_address.to_string(),
+            params.token_out.to_string(),
+            params.amount_out_min,
+            actions,
+            &env::current_account_id(),
+            0,
+            //GAS_FOR_CALLBACK,
+            10_000_000_000_000,
+        ))*/
+        .then(ext_ref::swap(
+            actions,
+            None,
+            &REF_FINANCE_ACCOUNT_ID,
+            0,
+            GAS_FOR_SWAP,
+        ))
+    }
+}
+
+#[near_bindgen]
+impl AfterSwap for Contract {
+    #[private]
+    fn callback_after_swap_to(
+        &mut self,
+        sender_id: AccountId,
+        token_in: AccountId,
+        amount_in: U128
+    ) -> bool {
+        assert_eq!(env::promise_results_count(), 1, "AfterSwap: Expected 1 promise result");
+        
+        match env::promise_result(0) {
+            // Promise will fail if ft_transfer from this contract
+            // to ref-finance fails
+            PromiseResult::Failed => {
+                env::log(b"Promise failed");
+                ext_fungible_token::ft_transfer(
+                    sender_id.clone(),
+                    amount_in,
+                    None,
+                    &token_in,
+                    1,
+                    GAS_FOR_FT_TRANSFER,
+                );
+            }
+            PromiseResult::Successful(_) => {
+                // Promise will be successful even if ref-finance fail.
+                // Token_in will refund tokens to this contract.
+                env::log(b"SwapToOtherBlockchain");
+            }
+            PromiseResult::NotReady => {
+                unreachable!()
+            }
         }
+
+        true
+    }
+
+    fn callback_after_swap_from(
+        &mut self,
+        new_address: AccountId,
+        token_out: AccountId,
+        amount_out_min: U128,
+    ) -> bool {
+        assert_eq!(env::promise_results_count(), 1, "AfterSwap: Expected 1 promise result");
+
+        match env::promise_result(0) {
+            // Promise will fail if ft_transfer from this contract
+            // to ref-finance fails
+            PromiseResult::Failed => {
+                env::log(b"TransferToken.ft_transfer_call FAILED");
+            },
+            PromiseResult::Successful(_) => {
+                // Promise will be successful even if ref-finance fail.
+                // Token_in will refund tokens to this contract.
+                env::log(b"Promise SUCCESSFUL");
+            },
+            PromiseResult::NotReady => {
+                unreachable!()
+            }
+        }
+
+        true
+    }
+
+    fn callback_after_deposit(
+        &mut self,
+        new_address: AccountId,
+        token_out: AccountId,
+        amount_out_min: U128,
+        swap_actions: Vec<SwapAction>,
+    ) -> bool {
+        assert_eq!(env::promise_results_count(), 1, "AfterSwap: Expected 1 promise result");
+
+        match env::promise_result(0) {
+            PromiseResult::Failed => {
+                env::log(b"Deposit FAILED");
+            },
+            PromiseResult::Successful(_) => {
+                env::log(b"Deposit SUCCESSFUL");
+
+                /* 
+                ext_ref::swap(
+                    swap_actions,
+                    None,
+                    &env::current_account_id(),
+                    0,
+                    //GAS_FOR_SWAP,
+                    20_000_000_000_000,
+                )
+                .then(ext_self::callback_after_swap(
+                    &env::current_account_id(),
+                    0,
+                    GAS_FOR_CALLBACK,
+                ));
+                */
+            },
+            PromiseResult::NotReady => {
+                unreachable!()
+            }
+        }
+
+        true
+    }
+
+    fn callback_after_swap(&mut self) -> bool {
+        assert_eq!(env::promise_results_count(), 1, "AfterSwap: Expected 1 promise result");
+
+        env::log(b"callback after swap");
+        true
     }
 }
 
@@ -66,29 +349,5 @@ mod tests {
         let mut builder = VMContextBuilder::new();
         builder.predecessor_account_id(predecessor);
         builder
-    }
-
-    #[test]
-    fn check_guess_solution() {
-        // Get Alice as an account ID
-        let alice = AccountId::new_unchecked("alice.testnet".to_string());
-        // Set up the testing context and unit test environment
-        let context = get_context(alice);
-        testing_env!(context.build());
-
-        // Set up contract object and call the new method
-        let mut contract = Contract::new(
-            "69c2feb084439956193f4c21936025f14a5a5a78979d67ae34762e18a7206a0f".to_string(),
-        );
-        let mut guess_result = contract.guess_solution("wrong answer here".to_string());
-        assert!(!guess_result, "Expected a failure from the wrong guess");
-        assert_eq!(get_logs(), ["Try again."], "Expected a failure log.");
-        guess_result = contract.guess_solution("near nomicon ref finance".to_string());
-        assert!(guess_result, "Expected the correct answer to return true.");
-        assert_eq!(
-            get_logs(),
-            ["Try again.", "You guessed right!"],
-            "Expected a successful log after the previous failed log."
-        );
     }
 }

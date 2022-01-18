@@ -1,14 +1,16 @@
 [package]
-name = "crossword-tutorial-chapter-1"
+name = "crosschain-token-swap"
 version = "0.1.0"
-authors = ["Near Inc <hello@near.org>", "Mike Purvis <mike@near.org>"]
+authors = ["Maxim Fedyarov"]
 edition = "2018"
+rust-version = "1.57"
 
 [lib]
 crate-type = ["cdylib"]
 
 [dependencies]
-near-sdk = "4.0.0-pre.4"
+near-sdk = "3.1.0"
+near-contract-standards = "3.2.0"
 hex = "0.4.3"
 
 [profile.release]
