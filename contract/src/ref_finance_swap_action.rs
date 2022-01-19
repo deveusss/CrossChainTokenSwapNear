@@ -1,6 +1,21 @@
 use crate::errors::WRONG_ACTION_RESULT;
 use near_sdk::serde::{Deserialize, Serialize};
+use near_sdk::json_types::ValidAccountId;
 use near_sdk::{env, json_types::U128, AccountId, Balance};
+
+
+/// Message parametes to receive in ref-finance via token function call
+/// * 'ExecuteSwap' - alternative to deposit + execute ref-finance.SwapAction
+#[derive(Serialize, Deserialize)]
+#[serde(crate = "near_sdk::serde")]
+#[serde(untagged)]
+pub enum RefFinanceReceiverMessage {
+    ExecuteSwap {
+        referal_id: Option<ValidAccountId>,
+        force: u8,
+        actions: Vec<Action>,
+    }
+}
 
 /// Single swap action.
 #[derive(Serialize, Deserialize)]

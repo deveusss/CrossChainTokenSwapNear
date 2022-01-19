@@ -1,3 +1,5 @@
+use std::convert::TryInto;
+
 use near_contract_standards::fungible_token::core_impl::ext_fungible_token;
 use near_sdk::borsh::{self, BorshDeserialize, BorshSerialize};
 use near_sdk::serde::{Deserialize, Serialize};
@@ -7,7 +9,9 @@ use near_sdk::{
     AccountId, Balance, Gas, PromiseResult,
 };
 
-pub use crate::ref_finance_swap_action::{Action, SwapAction};
+pub use crate::ref_finance_swap_action::{
+    Action, SwapAction, RefFinanceReceiverMessage
+};
 
 mod ref_finance_swap_action;
 mod errors;
@@ -28,6 +32,12 @@ pub trait ExtRefFinanceContract {
         actions: Vec<SwapAction>,
         referral_id: Option<ValidAccountId>,
     ) -> U128;
+    fn withdraw(
+        &mut self,
+        token_id: ValidAccountId,
+        amount: U128,
+        unregister: Option<bool>,
+    ) -> Promise;
 }
 
 #[ext_contract(ext_self)]
@@ -38,22 +48,12 @@ pub trait Callbacks {
         token_in: AccountId,
         amount_in: U128,
     ) -> bool;
-    fn callback_after_swap_from(
+    fn callback_after_swap_to_v2(
         &mut self,
-        new_address: AccountId,
-        token_out: AccountId,
-        amount_out_min: U128,
-    ) -> bool;
-    fn callback_after_deposit(
-        &mut self,
-        new_address: AccountId,
-        token_out: AccountId,
-        amount_out_min: U128,
-        swap_actions: Vec<SwapAction>,
-    ) -> bool;
-    fn callback_after_swap(
-        &mut self,
-    ) -> bool;
+        sender_id: AccountId,
+        token_in: AccountId,
+        amount_in: U128,
+    ) -> Promise;
 }
 
 pub trait AfterSwap {
@@ -63,22 +63,12 @@ pub trait AfterSwap {
         token_in: AccountId,
         amount_in: U128,
     ) -> bool;
-    fn callback_after_swap_from(
+    fn callback_after_swap_to_v2(
         &mut self,
-        new_address: AccountId,
-        token_out: AccountId,
-        amount_out_min: U128,
-    ) -> bool;
-    fn callback_after_deposit(
-        &mut self,
-        new_address: AccountId,
-        token_out: AccountId,
-        amount_out_min: U128,
-        swap_actions: Vec<SwapAction>
-    ) -> bool;
-    fn callback_after_swap(
-        &mut self,
-    ) -> bool;
+        sender_id: AccountId,
+        token_in: AccountId,
+        amount_in: U128,
+    ) -> Promise;
 }
 
 #[derive(Serialize, Deserialize)]
@@ -89,20 +79,6 @@ pub struct SwapFromParams {
     amount_with_fee: U128,
     amount_out_min: U128,
     original_tx_hash: String,
-}
-
-/// Message parametes to receive in ref-finance via token function call
-/// * 'ExecuteSwap' - alternative to deposit + execute ref-finance.SwapAction
-#[derive(Serialize, Deserialize)]
-#[serde(crate = "near_sdk::serde")]
-#[serde(untagged)]
-enum RefFinanceReceiverMessage {
-    ExecuteSwap {
-        // Ref-finance params
-        referal_id: Option<ValidAccountId>,
-        force: u8,
-        actions: Vec<Action>,
-    }
 }
 
 #[near_bindgen]
@@ -242,78 +218,52 @@ impl AfterSwap for Contract {
         true
     }
 
-    fn callback_after_swap_from(
+    #[private]
+    fn callback_after_swap_to_v2(
         &mut self,
-        new_address: AccountId,
-        token_out: AccountId,
-        amount_out_min: U128,
-    ) -> bool {
+        sender_id: AccountId,
+        token_in: AccountId,
+        amount_in: U128
+    ) -> Promise {
         assert_eq!(env::promise_results_count(), 1, "AfterSwap: Expected 1 promise result");
-
-        match env::promise_result(0) {
-            // Promise will fail if ft_transfer from this contract
-            // to ref-finance fails
-            PromiseResult::Failed => {
-                env::log(b"TransferToken.ft_transfer_call FAILED");
-            },
-            PromiseResult::Successful(_) => {
-                // Promise will be successful even if ref-finance fail.
-                // Token_in will refund tokens to this contract.
-                env::log(b"Promise SUCCESSFUL");
-            },
-            PromiseResult::NotReady => {
-                unreachable!()
-            }
-        }
-
-        true
-    }
-
-    fn callback_after_deposit(
-        &mut self,
-        new_address: AccountId,
-        token_out: AccountId,
-        amount_out_min: U128,
-        swap_actions: Vec<SwapAction>,
-    ) -> bool {
-        assert_eq!(env::promise_results_count(), 1, "AfterSwap: Expected 1 promise result");
-
+        
         match env::promise_result(0) {
             PromiseResult::Failed => {
-                env::log(b"Deposit FAILED");
-            },
-            PromiseResult::Successful(_) => {
-                env::log(b"Deposit SUCCESSFUL");
+                env::log(b"Swap failed");
 
-                /* 
-                ext_ref::swap(
-                    swap_actions,
+                ext_ref::withdraw(
+                    token_in.clone().try_into().unwrap(),
+                    U128(10),
                     None,
-                    &env::current_account_id(),
-                    0,
-                    //GAS_FOR_SWAP,
-                    20_000_000_000_000,
+                    &REF_FINANCE_ACCOUNT_ID,
+                    1,
+                    35_000_000_000_000,
                 )
-                .then(ext_self::callback_after_swap(
-                    &env::current_account_id(),
-                    0,
-                    GAS_FOR_CALLBACK,
-                ));
-                */
-            },
+                .then(ext_fungible_token::ft_transfer(
+                    sender_id,
+                    amount_in,
+                    None,
+                    &token_in,
+                    1,
+                    GAS_FOT_FT_TRANSFER_CALL,
+                ))
+            }
+            PromiseResult::Successful(_) => {
+                env::log(b"SwapToOtherBlockchain");
+
+                ext_ref::withdraw(
+                    "nusdt.ft-fin.testnet".try_into().unwrap(),
+                    U128(9),
+                    None,
+                    &REF_FINANCE_ACCOUNT_ID,
+                    1,
+                    35_000_000_000_000,
+                )
+            }
             PromiseResult::NotReady => {
                 unreachable!()
             }
         }
-
-        true
-    }
-
-    fn callback_after_swap(&mut self) -> bool {
-        assert_eq!(env::promise_results_count(), 1, "AfterSwap: Expected 1 promise result");
-
-        env::log(b"callback after swap");
-        true
     }
 }
 
