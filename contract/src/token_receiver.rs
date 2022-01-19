@@ -34,10 +34,9 @@ pub struct SwapToParams {
 ///                         ref-finance and emit swapToOther evnet
 #[derive(Serialize, Deserialize)]
 #[serde(crate = "near_sdk::serde")]
-#[serde(untagged)]
 enum TokenReceiverMessage {
     SwapTransferTokensToOther {
-        params: SwapToParams,
+        swap_to_params: SwapToParams,
     },
     SwapTokensToOther {
         swap_actions: Vec<SwapAction>,
@@ -78,7 +77,7 @@ impl FungibleTokenReceiver for Contract {
                         );
                     },
                     TokenReceiverMessage::SwapTransferTokensToOther {
-                        params,
+                        swap_to_params,
                     } => {
                         assert_eq!(
                             token_in,
