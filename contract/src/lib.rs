@@ -20,7 +20,7 @@ mod token_receiver;
 const REF_FINANCE_ACCOUNT_ID: &str = "ref-finance.testnet";
 const TRANSFER_TOKEN_ACCOUNT_ID: &str = "banana.ft-fin.testnet";
 
-pub const GAS_FOR_FT_TRANSFER: Gas =      45_000_000_000_000;
+pub const GAS_FOR_FT_TRANSFER: Gas =      30_000_000_000_000;
 pub const GAS_FOT_FT_TRANSFER_CALL: Gas = 35_000_000_000_000;
 pub const GAS_FOR_CALLBACK: Gas =         45_000_000_000_000;
 pub const GAS_FOR_SWAP: Gas =             30_000_000_000_000;
@@ -47,23 +47,11 @@ pub trait Callbacks {
         sender_id: AccountId,
         token_in: AccountId,
         amount_in: U128,
-    ) -> bool;
-    fn callback_after_swap_to_v2(
-        &mut self,
-        sender_id: AccountId,
-        token_in: AccountId,
-        amount_in: U128,
     ) -> Promise;
 }
 
 pub trait AfterSwap {
     fn callback_after_swap_to(
-        &mut self,
-        sender_id: AccountId,
-        token_in: AccountId,
-        amount_in: U128,
-    ) -> bool;
-    fn callback_after_swap_to_v2(
         &mut self,
         sender_id: AccountId,
         token_in: AccountId,
@@ -76,7 +64,7 @@ pub trait AfterSwap {
 pub struct SwapFromParams {
     new_address: AccountId,
     token_out: AccountId,
-    amount_with_fee: U128,
+    amount_in_without_fee: U128,
     amount_out_min: U128,
     original_tx_hash: String,
 }
@@ -101,82 +89,51 @@ impl Contract {
     }
 
     /// Transfer tokens to end user in current blockchain
+    /// * `params` - struct SwapFromParams
+    /// * `msg` - string with RefFinanceReceiverMessage. 
+    ///             If _None_ that user will get `transfer_token`         
     #[payable]
     pub fn swap_tokens_to_user_with_fee(
         &mut self,
         params: SwapFromParams,
-        msg: String,
+        msg: Option<String>,
     ) -> Promise {
         //TODO: self.assert_contract_running();
         //TODO: self.assert_predecessor_is_relayer();
         //TODO: add validate SwapFromParams
 
-        //TODO: substract fee
-        let amount_with_fee = params
-            .amount_with_fee.0;
-
-        //TODO: if token_out == TRANSFER_TOKEN then just transfer
-        ext_fungible_token::ft_transfer_call(
-            REF_FINANCE_ACCOUNT_ID.to_string(),
-            U128(amount_with_fee),
-            None,
-            msg,
-            &TRANSFER_TOKEN_ACCOUNT_ID.to_string(),
-            1,
-            //GAS_FOT_FT_TRANSFER_CALL,
-            90_000_000_000_000,
-        )
-        .then(ext_fungible_token::ft_transfer(
-            params.new_address.to_string(),
-            params.amount_out_min,
-            None,
-            &params.token_out.to_string(),
-            1,
-            //GAS_FOR_FT_TRANSFER,
-            30_000_000_000_000, 
-        ))
-    }
-
-    #[payable]
-    pub fn swap_tokens_to_user_with_fee_v2(
-        &mut self,
-        params: SwapFromParams,
-        actions: Vec<SwapAction>,
-    ) -> Promise {
-        //TODO: self.assert_contract_running();
-        //TODO: self.assert_predecessor_is_relayer();
-        //TODO: add validate SwapToUser params
-
-        //TODO: subtract fee
-        let amount_with_fee = params
-            .amount_with_fee.0;
-        
-        ext_fungible_token::ft_transfer_call(
-            REF_FINANCE_ACCOUNT_ID.to_string(),
-            U128(amount_with_fee),
-            None,
-            "goddamn".to_string(),
-            &TRANSFER_TOKEN_ACCOUNT_ID.to_string(),
-            1,
-            GAS_FOT_FT_TRANSFER_CALL,
-        )/* 
-        .then(ext_self::callback_after_deposit(
-            params.new_address.to_string(),
-            params.token_out.to_string(),
-            params.amount_out_min,
-            actions,
-            &env::current_account_id(),
-            0,
-            //GAS_FOR_CALLBACK,
-            10_000_000_000_000,
-        ))*/
-        .then(ext_ref::swap(
-            actions,
-            None,
-            &REF_FINANCE_ACCOUNT_ID,
-            0,
-            GAS_FOR_SWAP,
-        ))
+        match msg {
+            Some(ref_finance_receiver_msg) => {
+                ext_fungible_token::ft_transfer_call(
+                    REF_FINANCE_ACCOUNT_ID.to_string(),
+                    params.amount_in_without_fee,
+                    None,
+                    ref_finance_receiver_msg,
+                    &TRANSFER_TOKEN_ACCOUNT_ID.to_string(),
+                    1,
+                    //GAS_FOT_FT_TRANSFER_CALL,
+                    90_000_000_000_000,
+                )
+                .then(ext_fungible_token::ft_transfer(
+                    params.new_address.to_string(),
+                    params.amount_out_min,
+                    None,
+                    &params.token_out.to_string(),
+                    1,
+                    GAS_FOR_FT_TRANSFER,
+                ))
+            },
+            None => {
+                ext_fungible_token::ft_transfer(
+                    params.new_address,
+                    params.amount_out_min,
+                    None,
+                    &TRANSFER_TOKEN_ACCOUNT_ID.to_string(),
+                    1,
+                    GAS_FOR_FT_TRANSFER,
+                )
+            }
+        }
     }
 }
 
@@ -184,42 +141,6 @@ impl Contract {
 impl AfterSwap for Contract {
     #[private]
     fn callback_after_swap_to(
-        &mut self,
-        sender_id: AccountId,
-        token_in: AccountId,
-        amount_in: U128
-    ) -> bool {
-        assert_eq!(env::promise_results_count(), 1, "AfterSwap: Expected 1 promise result");
-        
-        match env::promise_result(0) {
-            // Promise will fail if ft_transfer from this contract
-            // to ref-finance fails
-            PromiseResult::Failed => {
-                env::log(b"Promise failed");
-                ext_fungible_token::ft_transfer(
-                    sender_id.clone(),
-                    amount_in,
-                    None,
-                    &token_in,
-                    1,
-                    GAS_FOR_FT_TRANSFER,
-                );
-            }
-            PromiseResult::Successful(_) => {
-                // Promise will be successful even if ref-finance fail.
-                // Token_in will refund tokens to this contract.
-                env::log(b"SwapToOtherBlockchain");
-            }
-            PromiseResult::NotReady => {
-                unreachable!()
-            }
-        }
-
-        true
-    }
-
-    #[private]
-    fn callback_after_swap_to_v2(
         &mut self,
         sender_id: AccountId,
         token_in: AccountId,

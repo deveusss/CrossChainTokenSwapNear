@@ -69,7 +69,7 @@ impl FungibleTokenReceiver for Contract {
                         swap_to_params,
                     } => {
                         // TODO: add validate Cross-chain params in msg
-                        self.internal_swap_tokens_v2(
+                        self.internal_swap_tokens(
                             sender_id.to_string(),
                             token_in, 
                             amount,
@@ -84,7 +84,6 @@ impl FungibleTokenReceiver for Contract {
                             "nusdt.ft-fin.testnet",
                             "ERR: Receiver - Wrong transfer token",
                         );
-
                         // TODO: add validate Cross-chain params in msg
 
                         env::log(b"SwapToOtherBlockchain");
@@ -101,35 +100,7 @@ impl FungibleTokenReceiver for Contract {
 }
 
 impl Contract {
-    /*
     pub(crate) fn internal_swap_tokens(
-        &mut self,
-        sender_id: AccountId,
-        token_in: AccountId,
-        amount_in: U128,
-        msg: String,
-    ) -> Promise {
-        ext_fungible_token::ft_transfer_call(
-            REF_FINANCE_ACCOUNT_ID.to_string(),
-            amount_in,
-            None,
-            msg,
-            &token_in,
-            1,
-           GAS_FOT_FT_TRANSFER_CALL,
-        )
-        .then(ext_self::callback_after_swap_to(
-            sender_id.to_string(),
-            token_in,
-            amount_in,
-            &env::current_account_id(),
-            0,
-            GAS_FOR_CALLBACK + 50_000_000_000_000,
-        ))
-    }
-    */
-
-    pub(crate) fn internal_swap_tokens_v2(
         &mut self,
         sender_id: AccountId,
         token_in: AccountId,
@@ -152,7 +123,7 @@ impl Contract {
             0,
             GAS_FOR_SWAP,
         ))
-        .then(ext_self::callback_after_swap_to_v2(
+        .then(ext_self::callback_after_swap_to(
             sender_id.to_string(),
             token_in,
             amount_in,
