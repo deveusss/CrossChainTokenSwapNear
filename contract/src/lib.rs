@@ -4,9 +4,11 @@ use near_contract_standards::fungible_token::core_impl::ext_fungible_token;
 use near_sdk::borsh::{self, BorshDeserialize, BorshSerialize};
 use near_sdk::serde::{Deserialize, Serialize};
 use near_sdk::json_types::{U128, ValidAccountId};
+use near_sdk::collections::LookupMap;
 use near_sdk::{
     env, near_bindgen, ext_contract, Promise,
     AccountId, Balance, Gas, PromiseResult,
+    BorshStorageKey, PanicOnDefault,
 };
 
 pub use crate::ref_finance_swap_action::{
@@ -16,9 +18,7 @@ pub use crate::ref_finance_swap_action::{
 mod ref_finance_swap_action;
 mod errors;
 mod token_receiver;
-
-const REF_FINANCE_ACCOUNT_ID: &str = "ref-finance.testnet";
-const TRANSFER_TOKEN_ACCOUNT_ID: &str = "banana.ft-fin.testnet";
+mod views;
 
 pub const GAS_FOR_FT_TRANSFER: Gas =      30_000_000_000_000;
 pub const GAS_FOT_FT_TRANSFER_CALL: Gas = 35_000_000_000_000;
@@ -41,12 +41,13 @@ pub trait ExtRefFinanceContract {
 }
 
 #[ext_contract(ext_self)]
-pub trait Callbacks {
+pub trait AfterSwap {
     fn callback_after_swap_to(
         &mut self,
         sender_id: AccountId,
         token_in: AccountId,
         amount_in: U128,
+        min_amount_out: U128,
     ) -> Promise;
 }
 
@@ -56,7 +57,16 @@ pub trait AfterSwap {
         sender_id: AccountId,
         token_in: AccountId,
         amount_in: U128,
+        min_amount_out: U128,
     ) -> Promise;
+}
+
+#[derive(BorshStorageKey, BorshSerialize)]
+pub(crate) enum StorageKey {
+    RbcAddresses,
+    ExistingOther,
+    FeeAmount,
+    CryptoFee,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -70,22 +80,56 @@ pub struct SwapFromParams {
 }
 
 #[near_bindgen]
-#[derive(Default, BorshDeserialize, BorshSerialize)]
+#[derive(BorshDeserialize, BorshSerialize, PanicOnDefault)]
 pub struct Contract {
-    crossword_solution: String,
+    owner: AccountId,
+    manager: AccountId,
+    relayer: AccountId,
+    transfer_token: AccountId,
+    blockchain_router: AccountId,
+    num_of_this_blockchain: u64,
+    rubic_addresses: LookupMap<u64, String>,
+    existing_other_blockchain: LookupMap<u64, bool>,
+    fee_amount_of_blockchain: LookupMap<u64, u64>,
+    blockchain_crypto_fee: LookupMap<u64, U128>,
+    is_running: bool,
 }
 
 #[near_bindgen]
 impl Contract {
     #[init]
-    pub fn new(solution: String) -> Self {
+    pub fn new(
+        owner_id: ValidAccountId, 
+        manager_id: ValidAccountId,
+        relayer_id: ValidAccountId,
+        transfer_token: ValidAccountId,
+        blockchain_router: ValidAccountId,
+        num_of_this_blockchain: u64,
+        is_running: bool,
+    ) -> Self {
         Self {
-            crossword_solution: solution,
+            owner: owner_id.as_ref().clone(),
+            manager: manager_id.as_ref().clone(),
+            relayer: relayer_id.as_ref().clone(),
+            transfer_token: transfer_token.as_ref().clone(),
+            blockchain_router: blockchain_router.as_ref().clone(),
+            num_of_this_blockchain,
+            rubic_addresses: LookupMap::new(StorageKey::RbcAddresses),
+            existing_other_blockchain: LookupMap::new(StorageKey::ExistingOther),
+            fee_amount_of_blockchain: LookupMap::new(StorageKey::FeeAmount),
+            blockchain_crypto_fee: LookupMap::new(StorageKey::CryptoFee),
+            is_running,
         }
     }
 
-    pub fn get_version(&self) -> u64 {
-        1
+    #[payable]
+    pub fn set_transfer_token(
+        &mut self,
+        new_transfer_token: ValidAccountId,
+    ) -> bool {
+        self.transfer_token = new_transfer_token.try_into().unwrap();
+
+        true
     }
 
     /// Transfer tokens to end user in current blockchain
@@ -98,18 +142,18 @@ impl Contract {
         params: SwapFromParams,
         msg: Option<String>,
     ) -> Promise {
-        //TODO: self.assert_contract_running();
+        self.assert_contract_running();
         //TODO: self.assert_predecessor_is_relayer();
         //TODO: add validate SwapFromParams
 
         match msg {
             Some(ref_finance_receiver_msg) => {
                 ext_fungible_token::ft_transfer_call(
-                    REF_FINANCE_ACCOUNT_ID.to_string(),
+                    self.get_blockchain_router(),
                     params.amount_in_without_fee,
                     None,
                     ref_finance_receiver_msg,
-                    &TRANSFER_TOKEN_ACCOUNT_ID.to_string(),
+                    &self.transfer_token,
                     1,
                     //GAS_FOT_FT_TRANSFER_CALL,
                     90_000_000_000_000,
@@ -128,7 +172,7 @@ impl Contract {
                     params.new_address,
                     params.amount_out_min,
                     None,
-                    &TRANSFER_TOKEN_ACCOUNT_ID.to_string(),
+                    &self.transfer_token,
                     1,
                     GAS_FOR_FT_TRANSFER,
                 )
@@ -144,7 +188,8 @@ impl AfterSwap for Contract {
         &mut self,
         sender_id: AccountId,
         token_in: AccountId,
-        amount_in: U128
+        amount_in: U128,
+        min_amount_out: U128,
     ) -> Promise {
         assert_eq!(env::promise_results_count(), 1, "AfterSwap: Expected 1 promise result");
         
@@ -154,15 +199,15 @@ impl AfterSwap for Contract {
 
                 ext_ref::withdraw(
                     token_in.clone().try_into().unwrap(),
-                    U128(10),
+                    min_amount_out,
                     None,
-                    &REF_FINANCE_ACCOUNT_ID,
+                    &self.blockchain_router,
                     1,
                     35_000_000_000_000,
                 )
                 .then(ext_fungible_token::ft_transfer(
                     sender_id,
-                    amount_in,
+                    min_amount_out,
                     None,
                     &token_in,
                     1,
@@ -173,10 +218,10 @@ impl AfterSwap for Contract {
                 env::log(b"SwapToOtherBlockchain");
 
                 ext_ref::withdraw(
-                    "nusdt.ft-fin.testnet".try_into().unwrap(),
-                    U128(9),
+                    self.get_transfer_token().try_into().unwrap(),
+                    min_amount_out,
                     None,
-                    &REF_FINANCE_ACCOUNT_ID,
+                    &self.blockchain_router,
                     1,
                     35_000_000_000_000,
                 )
@@ -184,6 +229,15 @@ impl AfterSwap for Contract {
             PromiseResult::NotReady => {
                 unreachable!()
             }
+        }
+    }
+}
+
+// Internal methods implementations 
+impl Contract {
+    fn assert_contract_running(&self) {
+        if self.is_running == false {
+            env::panic(b"Contract is on pause");
         }
     }
 }

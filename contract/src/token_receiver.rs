@@ -58,7 +58,7 @@ impl FungibleTokenReceiver for Contract {
         amount: U128, 
         msg: String
     ) -> PromiseOrValue<U128> {
-        //TODO: self.assert_contract_running();
+        self.assert_contract_running();
         let token_in = env::predecessor_account_id();
 
         serde_json::from_str::<TokenReceiverMessage>(&msg)
@@ -69,10 +69,15 @@ impl FungibleTokenReceiver for Contract {
                         swap_to_params,
                     } => {
                         // TODO: add validate Cross-chain params in msg
+                        let swaps_len = swap_actions.len();
+                        let min_amount_out = 
+                            swap_actions[swaps_len-1].min_amount_out;
+
                         self.internal_swap_tokens(
                             sender_id.to_string(),
                             token_in, 
                             amount,
+                            min_amount_out,
                             swap_actions,
                         );
                     },
@@ -81,7 +86,7 @@ impl FungibleTokenReceiver for Contract {
                     } => {
                         assert_eq!(
                             token_in,
-                            "nusdt.ft-fin.testnet",
+                            self.get_transfer_token(),
                             "ERR: Receiver - Wrong transfer token",
                         );
                         // TODO: add validate Cross-chain params in msg
@@ -105,10 +110,11 @@ impl Contract {
         sender_id: AccountId,
         token_in: AccountId,
         amount_in: U128,
+        min_amount_out: U128,
         actions: Vec<SwapAction>,
     ) -> Promise {
         ext_fungible_token::ft_transfer_call(
-            REF_FINANCE_ACCOUNT_ID.to_string(),
+            self.get_blockchain_router(),
             amount_in,
             None,
             "".to_string(),
@@ -119,7 +125,7 @@ impl Contract {
         .then(ext_ref::swap(
             actions,
             None,
-            &REF_FINANCE_ACCOUNT_ID,
+            &self.blockchain_router,
             0,
             GAS_FOR_SWAP,
         ))
@@ -127,6 +133,7 @@ impl Contract {
             sender_id.to_string(),
             token_in,
             amount_in,
+            min_amount_out,
             &env::current_account_id(),
             0,
             GAS_FOR_CALLBACK + 35_000_000_000_000 + 35_000_000_000_000,

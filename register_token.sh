@@ -1,8 +1,9 @@
 near call ref-finance.testnet register_tokens\
         '{
         "token_ids": [
-	"nusdt.ft-fin.testnet"
+	"nusdt.ft-fin.testnet",
+	"banana.ft-fin.testnet"
         ]
         }' \
-                --accountId dev-1640771380774-77776523511109 \
+                --accountId dev-1643014329889-22386061794158 \
                 --depositYocto 1
