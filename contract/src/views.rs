@@ -38,11 +38,10 @@ impl Contract {
 
     pub fn existing_other_blockchain(&self, blockchain_num: u64) -> bool {
         self.existing_other_blockchain
-            .get(&blockchain_num)
-            .expect("Wrong blockchain number")
+            .contains(&blockchain_num)
     }
 
-    pub fn get_fee_amount_of_blockchain(&self, blockchain_num: u64) -> u64 {
+    pub fn get_fee_amount_of_blockchain(&self, blockchain_num: u64) -> U128 {
         self.fee_amount_of_blockchain
             .get(&blockchain_num)
             .expect("Wrong blockchain number")

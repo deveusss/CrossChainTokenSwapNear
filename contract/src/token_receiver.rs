@@ -1,48 +1,10 @@
 use near_contract_standards::fungible_token::receiver::FungibleTokenReceiver;
-use near_sdk::serde::{Deserialize, Serialize};
 use near_sdk::{serde_json, PromiseOrValue};
 
-use crate::errors::*;
+use crate::interfaces::{
+    TokenReceiverMessage,
+};
 use super::*;
-
-/// Params required by cross-chain contract
-/// * `second_path` - path for token swaps in target blockchain. 
-///                     First must be `transfer_token` in target blockchain.
-///                     Last is `desired_token` in target blockchain.
-/// * `min_amount_out` - minimum amount of `desired_token` that user wants
-///                         to get in target blockchain
-/// * `blockchain` - uuid of target blockchain
-/// * `new_address` - user's address in target blockchain
-/// * `swap_to_crypto` - _true_ if user wants to get crypto in target blockchain
-/// * `signature` - method signature of dex that will be used in target 
-///                 blockchain for swaps 
-#[derive(Serialize, Deserialize)]
-#[serde(crate = "near_sdk::serde")]
-pub struct SwapToParams {
-    pub second_path: Vec<String>,
-    pub min_amount_out: String,
-    pub blockchain: u64,
-    pub new_address: String,
-    pub swap_to_crypto: bool,
-    pub signature: String,
-}
-
-/// Message parameters to receive via token function call
-/// * `SwapTransferTokensToOther` - transfer tokens from user to pool 
-///                                 and emit swapToOther event.
-/// * `SwapTokensToOther` - swap `token_in` for `transfer_token` via 
-///                         ref-finance and emit swapToOther evnet
-#[derive(Serialize, Deserialize)]
-#[serde(crate = "near_sdk::serde")]
-enum TokenReceiverMessage {
-    SwapTransferTokensToOther {
-        swap_to_params: SwapToParams,
-    },
-    SwapTokensToOther {
-        swap_actions: Vec<SwapAction>,
-        swap_to_params: SwapToParams,
-    }
-}
 
 #[near_bindgen]
 impl FungibleTokenReceiver for Contract {
@@ -66,9 +28,10 @@ impl FungibleTokenReceiver for Contract {
                 match message {
                     TokenReceiverMessage::SwapTokensToOther {
                         swap_actions,
-                        swap_to_params,
+                        swap_to_params: _,
                     } => {
                         // TODO: add validate Cross-chain params in msg
+                        // TODO: add validate to NON-trasnfer token 
                         let swaps_len = swap_actions.len();
                         let min_amount_out = 
                             swap_actions[swaps_len-1].min_amount_out;
@@ -82,7 +45,7 @@ impl FungibleTokenReceiver for Contract {
                         );
                     },
                     TokenReceiverMessage::SwapTransferTokensToOther {
-                        swap_to_params,
+                        swap_to_params: _,
                     } => {
                         assert_eq!(
                             token_in,
@@ -98,7 +61,7 @@ impl FungibleTokenReceiver for Contract {
 
                Ok(())
             })
-            .expect(RECEIVER_WRONG_MESSAGE);
+            .expect("Receiver - Wrong TokenReceiverMessage format");
            
         PromiseOrValue::Value(U128(0))
     }

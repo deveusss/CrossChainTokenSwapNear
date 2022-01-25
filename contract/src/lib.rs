@@ -2,23 +2,22 @@ use std::convert::TryInto;
 
 use near_contract_standards::fungible_token::core_impl::ext_fungible_token;
 use near_sdk::borsh::{self, BorshDeserialize, BorshSerialize};
-use near_sdk::serde::{Deserialize, Serialize};
 use near_sdk::json_types::{U128, ValidAccountId};
-use near_sdk::collections::LookupMap;
+use near_sdk::collections::{LookupMap, LookupSet};
 use near_sdk::{
     env, near_bindgen, ext_contract, Promise,
-    AccountId, Balance, Gas, PromiseResult,
+    AccountId, Gas, PromiseResult,
     BorshStorageKey, PanicOnDefault,
 };
 
-pub use crate::ref_finance_swap_action::{
-    Action, SwapAction, RefFinanceReceiverMessage
+pub use crate::interfaces::{
+    Action, SwapAction, RefFinanceReceiverMessage, SwapFromParams,
 };
 
-mod ref_finance_swap_action;
-mod errors;
 mod token_receiver;
 mod views;
+mod management;
+mod interfaces;
 
 pub const GAS_FOR_FT_TRANSFER: Gas =      30_000_000_000_000;
 pub const GAS_FOT_FT_TRANSFER_CALL: Gas = 35_000_000_000_000;
@@ -49,6 +48,10 @@ pub trait AfterSwap {
         amount_in: U128,
         min_amount_out: U128,
     ) -> Promise;
+    fn callback_after_swap_from(
+        &mut self,
+        original_tx_hash: String,
+    );
 }
 
 pub trait AfterSwap {
@@ -59,6 +62,10 @@ pub trait AfterSwap {
         amount_in: U128,
         min_amount_out: U128,
     ) -> Promise;
+    fn callback_after_swap_from(
+        &mut self,
+        original_tx_hash: String,
+    );
 }
 
 #[derive(BorshStorageKey, BorshSerialize)]
@@ -67,16 +74,7 @@ pub(crate) enum StorageKey {
     ExistingOther,
     FeeAmount,
     CryptoFee,
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(crate = "near_sdk::serde")] 
-pub struct SwapFromParams {
-    new_address: AccountId,
-    token_out: AccountId,
-    amount_in_without_fee: U128,
-    amount_out_min: U128,
-    original_tx_hash: String,
+    ProcessedTx,
 }
 
 #[near_bindgen]
@@ -88,10 +86,14 @@ pub struct Contract {
     transfer_token: AccountId,
     blockchain_router: AccountId,
     num_of_this_blockchain: u64,
+    min_token_amount: U128,
+    max_token_amount: U128,
+    acc_token_fee: U128,
     rubic_addresses: LookupMap<u64, String>,
-    existing_other_blockchain: LookupMap<u64, bool>,
-    fee_amount_of_blockchain: LookupMap<u64, u64>,
-    blockchain_crypto_fee: LookupMap<u64, U128>,
+    existing_other_blockchain: LookupSet<u64>,
+    fee_amount_of_blockchain: LookupMap<u64, U128>,
+    blockchain_crypto_fee: LookupMap<u64, U128>, // unused
+    processed_tx: LookupSet<String>,
     is_running: bool,
 }
 
@@ -105,6 +107,8 @@ impl Contract {
         transfer_token: ValidAccountId,
         blockchain_router: ValidAccountId,
         num_of_this_blockchain: u64,
+        min_token_amount: U128,
+        max_token_amount: U128,
         is_running: bool,
     ) -> Self {
         Self {
@@ -114,22 +118,16 @@ impl Contract {
             transfer_token: transfer_token.as_ref().clone(),
             blockchain_router: blockchain_router.as_ref().clone(),
             num_of_this_blockchain,
+            min_token_amount,
+            max_token_amount,
+            acc_token_fee: U128(0),
             rubic_addresses: LookupMap::new(StorageKey::RbcAddresses),
-            existing_other_blockchain: LookupMap::new(StorageKey::ExistingOther),
+            existing_other_blockchain: LookupSet::new(StorageKey::ExistingOther),
             fee_amount_of_blockchain: LookupMap::new(StorageKey::FeeAmount),
             blockchain_crypto_fee: LookupMap::new(StorageKey::CryptoFee),
+            processed_tx: LookupSet::new(StorageKey::ProcessedTx),
             is_running,
         }
-    }
-
-    #[payable]
-    pub fn set_transfer_token(
-        &mut self,
-        new_transfer_token: ValidAccountId,
-    ) -> bool {
-        self.transfer_token = new_transfer_token.try_into().unwrap();
-
-        true
     }
 
     /// Transfer tokens to end user in current blockchain
@@ -143,8 +141,14 @@ impl Contract {
         msg: Option<String>,
     ) -> Promise {
         self.assert_contract_running();
-        //TODO: self.assert_predecessor_is_relayer();
+        self.assert_relayer();
         //TODO: add validate SwapFromParams
+
+        assert_eq!(
+            self.processed_tx.contains(&params.original_tx_hash),
+            false,
+            "Swap already processed",
+        );
 
         match msg {
             Some(ref_finance_receiver_msg) => {
@@ -166,6 +170,12 @@ impl Contract {
                     1,
                     GAS_FOR_FT_TRANSFER,
                 ))
+                .then(ext_self::callback_after_swap_from(
+                    params.original_tx_hash,
+                    &env::current_account_id(),
+                    0,
+                    GAS_FOR_CALLBACK,
+                ))
             },
             None => {
                 ext_fungible_token::ft_transfer(
@@ -176,6 +186,12 @@ impl Contract {
                     1,
                     GAS_FOR_FT_TRANSFER,
                 )
+                .then(ext_self::callback_after_swap_from(
+                    params.original_tx_hash,
+                    &env::current_account_id(),
+                    0,
+                    GAS_FOR_CALLBACK,
+                ))
             }
         }
     }
@@ -231,14 +247,46 @@ impl AfterSwap for Contract {
             }
         }
     }
+
+    #[private]
+    fn callback_after_swap_from(
+        &mut self,
+        original_tx_hash: String,
+    ) {
+        assert_eq!(env::promise_results_count(), 1, "AfterSwap: Expected 1 promise result");
+
+        match env::promise_result(0) {
+            PromiseResult::Failed => {
+                env::log(b"SwapFromOTherBlockchain failed");
+            }
+            PromiseResult::Successful(_) => {
+                env::log(b"SwapFromOtherBlockchain");
+
+                self.processed_tx.insert(&original_tx_hash);
+            }
+            PromiseResult::NotReady => {
+                unreachable!()
+            }
+        }
+    }
 }
 
 // Internal methods implementations 
 impl Contract {
     fn assert_contract_running(&self) {
-        if self.is_running == false {
-            env::panic(b"Contract is on pause");
-        }
+        assert_eq!(
+            self.is_running,
+            true,
+            "Contract is on pause",
+        );
+    }
+
+    fn assert_relayer(&self) {
+        assert_eq!(
+            env::predecessor_account_id(),
+            self.relayer,
+            "Only for relayer",
+        )
     }
 }
 

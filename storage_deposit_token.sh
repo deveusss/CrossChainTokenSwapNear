@@ -1,6 +1,6 @@
 near call nusdt.ft-fin.testnet storage_deposit \
 	'{
-	"account_id": "dev-1643014329889-22386061794158",
+	"account_id": "dev-1643103882945-96345911945340",
 	"registration_only": true
 	}' \
 		--accountId maxik.testnet \
