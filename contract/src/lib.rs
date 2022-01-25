@@ -9,7 +9,6 @@ use near_sdk::{
     AccountId, Gas, PromiseResult,
     BorshStorageKey, PanicOnDefault,
 };
-
 pub use crate::interfaces::{
     Action, SwapAction, RefFinanceReceiverMessage, SwapFromParams,
 };
@@ -18,6 +17,7 @@ mod token_receiver;
 mod views;
 mod management;
 mod interfaces;
+mod utils;
 
 pub const GAS_FOR_FT_TRANSFER: Gas =      30_000_000_000_000;
 pub const GAS_FOT_FT_TRANSFER_CALL: Gas = 35_000_000_000_000;
@@ -142,7 +142,8 @@ impl Contract {
     ) -> Promise {
         self.assert_contract_running();
         self.assert_relayer();
-        //TODO: add validate SwapFromParams
+        
+        self.validate_swap_from(&params);
 
         assert_eq!(
             self.processed_tx.contains(&params.original_tx_hash),
@@ -179,7 +180,7 @@ impl Contract {
             },
             None => {
                 ext_fungible_token::ft_transfer(
-                    params.new_address,
+                    params.new_address.as_ref().clone(),
                     params.amount_out_min,
                     None,
                     &self.transfer_token,

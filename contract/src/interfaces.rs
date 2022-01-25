@@ -3,16 +3,18 @@ use near_sdk::serde::{Deserialize, Serialize};
 use near_sdk::AccountId;
 
 /// Params required by cross-chain contract for swap from other blockchain
-/// * `new_address` - 
-/// * `token_out` - 
-/// * `amount_in_without_fee -
-/// * `amount_out_min` - 
-/// * `original_tx_hash` - 
+/// * `new_address` - destination user address to transfer tokens
+/// * `token_out` - address of token that user wants to receive
+/// * `amount_in_without_fee - amount of tokens received in original blockchain
+///                             with substracted crypto_fee
+/// * `amount_out_min` - amount of tokens that user wants to receive 
+///                         after swap 
+/// * `original_tx_hash` - original transactions hash from other blockchain
 #[derive(Serialize, Deserialize)]
 #[serde(crate = "near_sdk::serde")] 
 pub struct SwapFromParams {
-    pub new_address: AccountId,
-    pub token_out: AccountId,
+    pub new_address: ValidAccountId,
+    pub token_out: ValidAccountId,
     pub amount_in_without_fee: U128,
     pub amount_out_min: U128,
     pub original_tx_hash: String,
@@ -57,6 +59,7 @@ pub enum TokenReceiverMessage {
     }
 }
 
+/// REF-FINANCE struct. Copypaste from https://github.com/ref-finance/ref-contracts/blob/audit_0.2.1/ref-exchange/src/token_receiver.rs
 /// Message parametes to receive in ref-finance via token function call
 /// * 'ExecuteSwap' - alternative to deposit + execute ref-finance.SwapAction
 #[derive(Serialize, Deserialize)]
@@ -70,6 +73,7 @@ pub enum RefFinanceReceiverMessage {
     }
 }
 
+/// REF-FINANCE struct. Copypaste from https://github.com/ref-finance/ref-contracts/blob/audit_0.2.1/ref-exchange/src/action.rs
 /// Single swap action
 /// * `pool_id` - Pool which should be used for swapping
 /// * `token_in` - Token to swap from
@@ -89,6 +93,7 @@ pub struct SwapAction {
     pub min_amount_out: U128,
 }
 
+/// REF-FINANCE struct. Copypaste from https://github.com/ref-finance/ref-contracts/blob/audit_0.2.1/ref-exchange/src/action.rs
 /// Single action. 
 /// Allows to execute sequence of various actions initiated by an account.
 #[derive(Serialize, Deserialize)]

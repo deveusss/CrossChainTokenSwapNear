@@ -28,15 +28,17 @@ impl FungibleTokenReceiver for Contract {
                 match message {
                     TokenReceiverMessage::SwapTokensToOther {
                         swap_actions,
-                        swap_to_params: _,
+                        swap_to_params,
                     } => {
-                        // TODO: add validate Cross-chain params in msg
-                        // TODO: add validate to NON-trasnfer token 
+                        self.validate_swap_actions(&swap_actions);
+                        self.validate_swap_to(&swap_to_params);
+                        self.validate_token_in_is_not_transfer(&token_in);
+
                         let swaps_len = swap_actions.len();
                         let min_amount_out = 
                             swap_actions[swaps_len-1].min_amount_out;
 
-                        self.internal_swap_tokens(
+                        self.swap_tokens(
                             sender_id.to_string(),
                             token_in, 
                             amount,
@@ -45,14 +47,11 @@ impl FungibleTokenReceiver for Contract {
                         );
                     },
                     TokenReceiverMessage::SwapTransferTokensToOther {
-                        swap_to_params: _,
+                        swap_to_params,
                     } => {
-                        assert_eq!(
-                            token_in,
-                            self.get_transfer_token(),
-                            "ERR: Receiver - Wrong transfer token",
-                        );
-                        // TODO: add validate Cross-chain params in msg
+                        self.validate_swap_to(&swap_to_params);
+                        self.validate_amount_in(&amount);
+                        self.validate_token_in_is_transfer(&token_in);
 
                         env::log(b"SwapToOtherBlockchain");
                     },
@@ -68,7 +67,7 @@ impl FungibleTokenReceiver for Contract {
 }
 
 impl Contract {
-    pub(crate) fn internal_swap_tokens(
+    pub(crate) fn swap_tokens(
         &mut self,
         sender_id: AccountId,
         token_in: AccountId,
