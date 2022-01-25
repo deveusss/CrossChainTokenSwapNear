@@ -30,6 +30,14 @@ impl Contract {
         self.num_of_this_blockchain
     }
 
+    pub fn get_min_token_amount(&self) -> U128 {
+        self.min_token_amount
+    }
+
+    pub fn get_max_token_amount(&self) -> U128 {
+        self.max_token_amount
+    }
+
     pub fn get_rubic_address(&self, blockchain_num: u64) -> String {
         self.rubic_addresses
             .get(&blockchain_num)
