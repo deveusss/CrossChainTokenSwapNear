@@ -31,3 +31,18 @@
 
 `msg` - необходим для случая, когда пользователю требуется не транзитный токен. Сюда необходимо засунуть JSPN строку, в которой описано 
 [перечисление](https://github.com/Cryptorubic/CrossChainTokenSwapNear/blob/dab1412af8aee2e5efecf1412543642e136727f9/contract/src/ref_finance_swap_action.rs#L12).
+
+## Затраты на поддержку и содержание
+
+### `storage_deposit` для ref-finance
+Для регистрации одного токена в REF-FINANCE - 1020000000000000000000 Yocto ~ 0.002 NEAR включая комиссию за газ (4)
+
+### `storage_deposit` для токена
+Для регистрация контракта на токен - 1250000000000000000000 Yocto ~ 0.02 NEAR включая комиссию за газ (2)
+
+### `register_token`
+Регистрация токена в NEAR 
+
+В данный момент зарегистрированы на REF-FINANCE:
+1. `wrap.near`
+2. `a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48.factory.bridge.near`
