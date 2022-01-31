@@ -41,13 +41,13 @@ impl Contract {
     #[payable]
     pub fn set_min_token_amount(&mut self, min_token_amount: U128) {
         self.assert_owner_or_manager();
-        self.min_token_amount = min_token_amount;
+        self.min_token_amount = u128::from(min_token_amount);
     }
 
     #[payable]
     pub fn set_max_token_amount(&mut self, max_token_amount: U128) {
         self.assert_owner_or_manager();
-        self.max_token_amount = max_token_amount;
+        self.max_token_amount = u128::from(max_token_amount);
     }
 
     #[payable]
@@ -86,7 +86,7 @@ impl Contract {
 
         ext_fungible_token::ft_transfer(
             env::predecessor_account_id(),
-            self.acc_token_fee,
+            U128(self.acc_token_fee),
             None,
             &self.transfer_token,
             1,
@@ -118,14 +118,14 @@ impl Contract {
         self.rubic_addresses.insert(&blockchain_num, &rubic_address);
     }
 
+    /// fee_amount is represented as hundredths of a bip, i.e. 1e-6
     #[payable]
     pub fn set_fee_amount_of_blockchain(
         &mut self,
-        blockchain_num: u64,
         fee_amount: U128,
     ) {
         self.assert_owner_or_manager();
-        self.fee_amount_of_blockchain.insert(&blockchain_num, &fee_amount);
+        self.fee_amount_of_blockchain = u128::from(fee_amount);
     }
 
     /// ACCESS CONTROL

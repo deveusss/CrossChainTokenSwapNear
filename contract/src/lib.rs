@@ -19,10 +19,13 @@ mod management;
 mod interfaces;
 mod utils;
 
-pub const GAS_FOR_FT_TRANSFER: Gas =      30_000_000_000_000;
+pub const GAS_FOR_FT_TRANSFER_CALL_SWAP_TO: Gas = 90_000_000_000_000;
 pub const GAS_FOT_FT_TRANSFER_CALL: Gas = 35_000_000_000_000;
+pub const GAS_FOR_FT_TRANSFER: Gas =      30_000_000_000_000;
+pub const GAS_FOR_CALLBACK_SWAP_TO: Gas = 120_000_000_000_000;
 pub const GAS_FOR_CALLBACK: Gas =         45_000_000_000_000;
 pub const GAS_FOR_SWAP: Gas =             30_000_000_000_000;
+pub const GAS_FOR_WITHDRAW: Gas =         60_000_000_000_000;
 
 #[ext_contract(ext_ref)]
 pub trait ExtRefFinanceContract {
@@ -72,7 +75,6 @@ pub trait AfterSwap {
 pub(crate) enum StorageKey {
     RbcAddresses,
     ExistingOther,
-    FeeAmount,
     CryptoFee,
     ProcessedTx,
 }
@@ -86,12 +88,12 @@ pub struct Contract {
     transfer_token: AccountId,
     blockchain_router: AccountId,
     num_of_this_blockchain: u64,
-    min_token_amount: U128,
-    max_token_amount: U128,
-    acc_token_fee: U128,
+    min_token_amount: u128,
+    max_token_amount: u128,
+    acc_token_fee: u128,
+    fee_amount_of_blockchain: u128,
     rubic_addresses: LookupMap<u64, String>,
     existing_other_blockchain: LookupSet<u64>,
-    fee_amount_of_blockchain: LookupMap<u64, U128>,
     blockchain_crypto_fee: LookupMap<u64, U128>, // unused
     processed_tx: LookupSet<String>,
     is_running: bool,
@@ -109,6 +111,7 @@ impl Contract {
         num_of_this_blockchain: u64,
         min_token_amount: U128,
         max_token_amount: U128,
+        fee_amount_of_blockchain: U128,
         is_running: bool,
     ) -> Self {
         Self {
@@ -118,12 +121,12 @@ impl Contract {
             transfer_token: transfer_token.as_ref().clone(),
             blockchain_router: blockchain_router.as_ref().clone(),
             num_of_this_blockchain,
-            min_token_amount,
-            max_token_amount,
-            acc_token_fee: U128(0),
+            min_token_amount: u128::from(min_token_amount),
+            max_token_amount: u128::from(max_token_amount),
+            fee_amount_of_blockchain: u128::from(fee_amount_of_blockchain),
+            acc_token_fee: 0,
             rubic_addresses: LookupMap::new(StorageKey::RbcAddresses),
             existing_other_blockchain: LookupSet::new(StorageKey::ExistingOther),
-            fee_amount_of_blockchain: LookupMap::new(StorageKey::FeeAmount),
             blockchain_crypto_fee: LookupMap::new(StorageKey::CryptoFee),
             processed_tx: LookupSet::new(StorageKey::ProcessedTx),
             is_running,
@@ -142,7 +145,6 @@ impl Contract {
     ) -> Promise {
         self.assert_contract_running();
         self.assert_relayer();
-        
         self.validate_swap_from(&params);
 
         assert_eq!(
@@ -151,18 +153,30 @@ impl Contract {
             "Swap already processed",
         );
 
+        let amount_in_without_fee = 
+            u128::from(params.amount_in_with_fee) *  
+            (1_000_000 - self.fee_amount_of_blockchain) / 
+            1_000_000;
+
+        self.acc_token_fee += 
+            u128::from(params.amount_in_with_fee) - 
+            amount_in_without_fee; 
+
         match msg {
             Some(ref_finance_receiver_msg) => {
+                // Transfer `transfer_token` to REF-FINANCE and swap them 
+                // for `desired token`.
                 ext_fungible_token::ft_transfer_call(
                     self.get_blockchain_router(),
-                    params.amount_in_without_fee,
+                    U128(amount_in_without_fee),
                     None,
                     ref_finance_receiver_msg,
                     &self.transfer_token,
                     1,
-                    //GAS_FOT_FT_TRANSFER_CALL,
-                    90_000_000_000_000,
+                    GAS_FOR_FT_TRANSFER_CALL_SWAP_TO,
                 )
+                // If swap on previous tx will fail, than `transfer_token` will
+                // refund to this contract. This promise also will fail.
                 .then(ext_fungible_token::ft_transfer(
                     params.new_address.to_string(),
                     params.amount_out_min,
@@ -181,7 +195,7 @@ impl Contract {
             None => {
                 ext_fungible_token::ft_transfer(
                     params.new_address.as_ref().clone(),
-                    params.amount_out_min,
+                    U128(amount_in_without_fee),
                     None,
                     &self.transfer_token,
                     1,
@@ -216,15 +230,15 @@ impl AfterSwap for Contract {
 
                 ext_ref::withdraw(
                     token_in.clone().try_into().unwrap(),
-                    min_amount_out,
+                    amount_in,
                     None,
                     &self.blockchain_router,
                     1,
-                    35_000_000_000_000,
+                    GAS_FOR_WITHDRAW,
                 )
                 .then(ext_fungible_token::ft_transfer(
                     sender_id,
-                    min_amount_out,
+                    amount_in,
                     None,
                     &token_in,
                     1,
@@ -240,7 +254,7 @@ impl AfterSwap for Contract {
                     None,
                     &self.blockchain_router,
                     1,
-                    35_000_000_000_000,
+                    GAS_FOR_WITHDRAW,
                 )
             }
             PromiseResult::NotReady => {
@@ -288,40 +302,5 @@ impl Contract {
             self.relayer,
             "Only for relayer",
         )
-    }
-}
-
-/*
- * the rest of this file sets up unit tests
- * to run these, the command will be:
- * cargo test --package rust-template -- --nocapture
- * Note: 'rust-template' comes from Cargo.toml's 'name' key
- */
-
-// use the attribute below for unit tests
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use near_sdk::test_utils::{get_logs, VMContextBuilder};
-    use near_sdk::{testing_env, AccountId};
-
-    #[test]
-    fn debug_get_hash() {
-        // Basic set up for a unit test
-        testing_env!(VMContextBuilder::new().build());
-
-        // Using a unit test to rapidly debug and iterate
-        let debug_solution = "near nomicon ref finance";
-        let debug_hash_bytes = env::sha256(debug_solution.as_bytes());
-        let debug_hash_string = hex::encode(debug_hash_bytes);
-        println!("Let's debug: {:?}", debug_hash_string);
-    }
-
-    // part of writing unit tests is setting up a mock context
-    // provide a `predecessor` here, it'll modify the default context
-    fn get_context(predecessor: AccountId) -> VMContextBuilder {
-        let mut builder = VMContextBuilder::new();
-        builder.predecessor_account_id(predecessor);
-        builder
     }
 }

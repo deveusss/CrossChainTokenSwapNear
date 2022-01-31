@@ -29,11 +29,11 @@ impl Contract {
 
     pub fn validate_amount_in(&self, amount_in: &U128) {
         assert!(
-            u128::from(*amount_in) >= u128::from(self.min_token_amount),
+            u128::from(*amount_in) >= self.min_token_amount,
             "Not enough tokens",
         );
         assert!(
-            u128::from(*amount_in) <= u128::from(self.max_token_amount),
+            u128::from(*amount_in) <= self.max_token_amount,
             "Too much tokens requested",
         )
     }
@@ -66,11 +66,11 @@ impl Contract {
             swap_actions[swaps_len-1].token_out.clone();
         
         assert!(
-            u128::from(min_amount_out) >= u128::from(self.min_token_amount),
+            u128::from(min_amount_out) >= self.min_token_amount,
             "Not enough tokens",
         );
         assert!(
-            u128::from(min_amount_out) <= u128::from(self.max_token_amount),
+            u128::from(min_amount_out) <= self.max_token_amount,
             "Too much tokens requested",
         );
         assert!(
@@ -81,13 +81,13 @@ impl Contract {
 
     pub fn validate_swap_from(&self, swap_from: &SwapFromParams) {
         assert!(
-            u128::from(swap_from.amount_in_without_fee) >= 
-            u128::from(self.min_token_amount),
+            u128::from(swap_from.amount_in_with_fee) >= 
+            self.min_token_amount,
             "Not enough tokens",
         );
         assert!(
-            u128::from(swap_from.amount_in_without_fee) <= 
-            u128::from(self.max_token_amount),
+            u128::from(swap_from.amount_in_with_fee) <= 
+            self.max_token_amount,
             "Too much tokens requested",
         );
     }

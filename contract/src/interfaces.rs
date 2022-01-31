@@ -15,7 +15,7 @@ use near_sdk::AccountId;
 pub struct SwapFromParams {
     pub new_address: ValidAccountId,
     pub token_out: ValidAccountId,
-    pub amount_in_without_fee: U128,
+    pub amount_in_with_fee: U128,
     pub amount_out_min: U128,
     pub original_tx_hash: String,
 }

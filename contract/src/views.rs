@@ -31,11 +31,19 @@ impl Contract {
     }
 
     pub fn get_min_token_amount(&self) -> U128 {
-        self.min_token_amount
+        U128(self.min_token_amount)
     }
 
     pub fn get_max_token_amount(&self) -> U128 {
-        self.max_token_amount
+        U128(self.max_token_amount)
+    }
+
+    pub fn get_acc_token_fee(&self) -> U128 {
+        U128(self.acc_token_fee)
+    }
+
+    pub fn get_fee_amount_of_blockchain(&self) -> U128 {
+        U128(self.fee_amount_of_blockchain)
     }
 
     pub fn get_rubic_address(&self, blockchain_num: u64) -> String {
@@ -47,12 +55,6 @@ impl Contract {
     pub fn existing_other_blockchain(&self, blockchain_num: u64) -> bool {
         self.existing_other_blockchain
             .contains(&blockchain_num)
-    }
-
-    pub fn get_fee_amount_of_blockchain(&self, blockchain_num: u64) -> U128 {
-        self.fee_amount_of_blockchain
-            .get(&blockchain_num)
-            .expect("Wrong blockchain number")
     }
 
     pub fn is_running(&self) -> bool {

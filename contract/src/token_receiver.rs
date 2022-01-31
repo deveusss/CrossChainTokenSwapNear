@@ -98,7 +98,7 @@ impl Contract {
             min_amount_out,
             &env::current_account_id(),
             0,
-            GAS_FOR_CALLBACK + 35_000_000_000_000 + 35_000_000_000_000,
+            GAS_FOR_CALLBACK_SWAP_TO,
         ))
     }
 }
