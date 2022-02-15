@@ -8,6 +8,7 @@ use near_sdk::{
     env, near_bindgen, ext_contract, Promise,
     AccountId, Gas, PromiseResult,
     BorshStorageKey, PanicOnDefault,
+    serde_json, 
 };
 pub use crate::interfaces::{
     Action, SwapAction, RefFinanceReceiverMessage, SwapFromParams,
@@ -164,13 +165,40 @@ impl Contract {
 
         match msg {
             Some(ref_finance_receiver_msg) => {
+                let msg = serde_json::from_str::<RefFinanceReceiverMessage>(&ref_finance_receiver_msg)
+                    .and_then(|message|{
+                        let msg_without_fee = match message {
+                            RefFinanceReceiverMessage::ExecuteSwap { 
+                                referal_id, force, mut actions 
+                            } => {
+                                assert!(actions.len() > 0, "Must be 1 or more SwapAction in msg");
+                                let action = match actions.remove(0) {
+                                    Action::Swap(swap_action) => {
+                                        let mut swap_action_without_fee = swap_action;
+                                        swap_action_without_fee.amount_in = Some(U128(amount_in_without_fee));
+
+                                        Action::Swap(swap_action_without_fee)
+                                    }
+                                };
+
+                                actions.push(action);
+
+                                RefFinanceReceiverMessage::ExecuteSwap{
+                                    referal_id, force, actions,
+                                }
+                            }
+                        };
+
+                        serde_json::to_string(&msg_without_fee)
+                    })
+                    .unwrap();
                 // Transfer `transfer_token` to REF-FINANCE and swap them 
                 // for `desired token`.
                 ext_fungible_token::ft_transfer_call(
                     self.get_blockchain_router(),
                     U128(amount_in_without_fee),
                     None,
-                    ref_finance_receiver_msg,
+                    msg,
                     &self.transfer_token,
                     1,
                     GAS_FOR_FT_TRANSFER_CALL_SWAP_TO,
