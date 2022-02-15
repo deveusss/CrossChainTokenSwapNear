@@ -27,10 +27,10 @@
 
 Параметры: 
 
-`params` - структура [SwapFromParams](https://github.com/Cryptorubic/CrossChainTokenSwapNear/blob/dab1412af8aee2e5efecf1412543642e136727f9/contract/src/lib.rs#L64).
+`params` - структура [SwapFromParams](https://github.com/Cryptorubic/CrossChainTokenSwapNear/blob/03e16dfa5b4f51e0a6faf66467a9d07507fd821f/contract/src/interfaces.rs#L15).
 
 `msg` - необходим для случая, когда пользователю требуется не транзитный токен. Сюда необходимо засунуть JSPN строку, в которой описано 
-[перечисление](https://github.com/Cryptorubic/CrossChainTokenSwapNear/blob/dab1412af8aee2e5efecf1412543642e136727f9/contract/src/ref_finance_swap_action.rs#L12).
+[перечисление](https://github.com/Cryptorubic/CrossChainTokenSwapNear/blob/03e16dfa5b4f51e0a6faf66467a9d07507fd821f/contract/src/interfaces.rs#L68).
 
 ## Затраты на поддержку и содержание
 
