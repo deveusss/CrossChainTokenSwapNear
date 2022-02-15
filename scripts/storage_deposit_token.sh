@@ -1,4 +1,4 @@
-near call token1.ref-finance.testnet storage_deposit \
+near call nweth.ft-fin.testnet storage_deposit \
 	'{
 	"account_id": "dev-1643193012129-24813219060028",
 	"registration_only": true

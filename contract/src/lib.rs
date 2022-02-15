@@ -27,6 +27,9 @@ pub const GAS_FOR_CALLBACK_SWAP_TO: Gas = 120_000_000_000_000;
 pub const GAS_FOR_CALLBACK: Gas =         45_000_000_000_000;
 pub const GAS_FOR_SWAP: Gas =             30_000_000_000_000;
 pub const GAS_FOR_WITHDRAW: Gas =         60_000_000_000_000;
+pub const GAS_FOR_WRAP_WITHDRAW: Gas =    50_000_000_000_000;
+
+pub const WRAP_NEAR: &str = "wrap.near";
 
 #[ext_contract(ext_ref)]
 pub trait ExtRefFinanceContract {
@@ -43,6 +46,14 @@ pub trait ExtRefFinanceContract {
     ) -> Promise;
 }
 
+#[ext_contract(ext_wrap)]
+pub trait ExtWrapContarct {
+    fn near_withdraw(
+        &mut self,
+        amount: U128,
+    ) -> Promise;
+}
+
 #[ext_contract(ext_self)]
 pub trait AfterSwap {
     fn callback_after_swap_to(
@@ -55,6 +66,8 @@ pub trait AfterSwap {
     fn callback_after_swap_from(
         &mut self,
         original_tx_hash: String,
+        new_address_for_near_receive: Option<ValidAccountId>,
+        min_amount_out: Option<U128>,
     );
 }
 
@@ -69,6 +82,8 @@ pub trait AfterSwap {
     fn callback_after_swap_from(
         &mut self,
         original_tx_hash: String,
+        new_address_for_near_receive: Option<ValidAccountId>,
+        min_amount_out: Option<U128>,
     );
 }
 
@@ -192,33 +207,70 @@ impl Contract {
                         serde_json::to_string(&msg_without_fee)
                     })
                     .unwrap();
-                // Transfer `transfer_token` to REF-FINANCE and swap them 
-                // for `desired token`.
-                ext_fungible_token::ft_transfer_call(
-                    self.get_blockchain_router(),
-                    U128(amount_in_without_fee),
-                    None,
-                    msg,
-                    &self.transfer_token,
-                    1,
-                    GAS_FOR_FT_TRANSFER_CALL_SWAP_TO,
-                )
-                // If swap on previous tx will fail, than `transfer_token` will
-                // refund to this contract. This promise also will fail.
-                .then(ext_fungible_token::ft_transfer(
-                    params.new_address.to_string(),
-                    params.amount_out_min,
-                    None,
-                    &params.token_out.to_string(),
-                    1,
-                    GAS_FOR_FT_TRANSFER,
-                ))
-                .then(ext_self::callback_after_swap_from(
-                    params.original_tx_hash,
-                    &env::current_account_id(),
-                    0,
-                    GAS_FOR_CALLBACK,
-                ))
+
+                match params.token_out.to_string().as_str() {
+                    WRAP_NEAR => {
+                        // Transfer `transfer_token` to REF-FINANCE and swap them 
+                        // for `desired token`.
+                        ext_fungible_token::ft_transfer_call(
+                            self.get_blockchain_router(),
+                            U128(amount_in_without_fee),
+                            None,
+                            msg,
+                            &self.transfer_token,
+                            1,
+                            GAS_FOR_FT_TRANSFER_CALL_SWAP_TO,
+                        )
+                        // Withdraw wrap.near 
+                        // If swap on previous tx will fail, than 
+                        // `promise_after_transfer_call` will refund to this contract.
+                        // This promise also will fail.
+                        .then(ext_wrap::near_withdraw(
+                            params.amount_out_min,
+                            &WRAP_NEAR.to_string(),
+                            1,
+                            GAS_FOR_WRAP_WITHDRAW,
+                        ))
+                        .then(ext_self::callback_after_swap_from(
+                            params.original_tx_hash,
+                            Some(params.new_address),
+                            Some(params.amount_out_min),
+                            &env::current_account_id(),
+                            0,
+                            GAS_FOR_CALLBACK,
+                        ))
+                    },
+                    _ => {
+                        // Transfer `transfer_token` to REF-FINANCE and swap them 
+                        // for `desired token`.
+                        ext_fungible_token::ft_transfer_call(
+                            self.get_blockchain_router(),
+                            U128(amount_in_without_fee),
+                            None,
+                            msg,
+                            &self.transfer_token,
+                            1,
+                            GAS_FOR_FT_TRANSFER_CALL_SWAP_TO,
+                        )
+                        // Transfer `token_out` tokens to the `new_address`.
+                        .then(ext_fungible_token::ft_transfer(
+                            params.new_address.to_string(),
+                            params.amount_out_min,
+                            None,
+                            &params.token_out.to_string(),
+                            1,
+                            GAS_FOR_FT_TRANSFER,
+                        ))
+                        .then(ext_self::callback_after_swap_from(
+                            params.original_tx_hash,
+                            None, 
+                            None,
+                            &env::current_account_id(),
+                            0,
+                            GAS_FOR_CALLBACK,
+                        ))
+                    }
+                }
             },
             None => {
                 ext_fungible_token::ft_transfer(
@@ -231,6 +283,8 @@ impl Contract {
                 )
                 .then(ext_self::callback_after_swap_from(
                     params.original_tx_hash,
+                    None,
+                    None,
                     &env::current_account_id(),
                     0,
                     GAS_FOR_CALLBACK,
@@ -295,6 +349,8 @@ impl AfterSwap for Contract {
     fn callback_after_swap_from(
         &mut self,
         original_tx_hash: String,
+        new_address_for_near_receive: Option<ValidAccountId>,
+        min_amount_out: Option<U128>,
     ) {
         assert_eq!(env::promise_results_count(), 1, "AfterSwap: Expected 1 promise result");
 
@@ -304,6 +360,12 @@ impl AfterSwap for Contract {
             }
             PromiseResult::Successful(_) => {
                 env::log(b"SwapFromOtherBlockchain");
+
+                // Transfer unwrapped NEAR to `new_address`
+                if let Some(min_amount_out) = min_amount_out {
+                    Promise::new(new_address_for_near_receive.unwrap().to_string())
+                        .transfer(min_amount_out.into());
+                }
 
                 self.processed_tx.insert(&original_tx_hash);
             }
