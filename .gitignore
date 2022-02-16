@@ -10,7 +10,6 @@
 
 # production
 /build
-/res
 
 # misc
 .env.local
@@ -25,3 +24,4 @@ yarn-error.log*
 
 # Rust smart contract
 contract/target
+contract/res
