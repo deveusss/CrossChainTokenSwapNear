@@ -57,6 +57,10 @@ impl Contract {
             .contains(&blockchain_num)
     }
 
+    pub fn is_processed_tx(&self, original_tx_hash: String) -> bool {
+        self.processed_tx.contains(&original_tx_hash)
+    }
+
     pub fn is_running(&self) -> bool {
         self.is_running 
     }
